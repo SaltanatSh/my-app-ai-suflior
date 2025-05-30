@@ -1,23 +1,52 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useAudioRecorder } from './hooks/useAudioRecorder';
+import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+import { LanguageSelector } from './components/LanguageSelector';
 
 export default function Home() {
-  const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState('');
   const [analysisResults, setAnalysisResults] = useState('');
   const [status, setStatus] = useState('Готов к записи');
+  
+  const { isRecording, error: recordingError, audioBlob } = useAudioRecorder();
+  const {
+    isListening,
+    error: recognitionError,
+    finalTranscript,
+    interimTranscript,
+    selectedLanguage,
+    startListening,
+    stopListening,
+    resetTranscript,
+    setLanguage
+  } = useSpeechRecognition();
 
-  const startRecording = () => {
-    setIsRecording(true);
-    setStatus('Запись...');
-    // TODO: Implement actual recording logic
+  // Update status based on recording state and errors
+  useEffect(() => {
+    if (recordingError) {
+      setStatus(`Ошибка записи: ${recordingError}`);
+    } else if (recognitionError) {
+      setStatus(`Ошибка распознавания: ${recognitionError}`);
+    } else if (isRecording && isListening) {
+      setStatus('Запись и распознавание...');
+    } else if (isRecording) {
+      setStatus('Запись...');
+    } else if (audioBlob) {
+      setStatus('Запись завершена, готов к анализу');
+    } else {
+      setStatus('Готов к записи');
+    }
+  }, [isRecording, isListening, recordingError, recognitionError, audioBlob]);
+
+  const handleStartRecording = async () => {
+    resetTranscript();
+    setAnalysisResults('');
+    startListening();
   };
 
-  const stopRecording = () => {
-    setIsRecording(false);
-    setStatus('Анализ записи...');
-    // TODO: Implement stop recording and analysis logic
+  const handleStopRecording = () => {
+    stopListening();
   };
 
   return (
@@ -27,34 +56,43 @@ export default function Home() {
       </h1>
 
       <div className="space-y-6">
-        {/* Recording Controls */}
-        <div className="flex justify-center gap-4">
-          <button
-            onClick={startRecording}
-            disabled={isRecording}
-            className={`px-4 py-2 rounded-lg ${
-              isRecording
-                ? 'bg-gray-400'
-                : 'bg-blue-500 hover:bg-blue-600'
-            } text-white font-medium`}
-          >
-            Начать запись
-          </button>
-          <button
-            onClick={stopRecording}
-            disabled={!isRecording}
-            className={`px-4 py-2 rounded-lg ${
-              !isRecording
-                ? 'bg-gray-400'
-                : 'bg-red-500 hover:bg-red-600'
-            } text-white font-medium`}
-          >
-            Стоп запись
-          </button>
+        {/* Language and Recording Controls */}
+        <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+          <LanguageSelector
+            selectedLanguage={selectedLanguage}
+            onLanguageChange={setLanguage}
+            disabled={isListening || isRecording}
+          />
+          <div className="flex justify-center gap-4">
+            <button
+              onClick={handleStartRecording}
+              disabled={isRecording || isListening}
+              className={`px-4 py-2 rounded-lg ${
+                isRecording || isListening
+                  ? 'bg-gray-400'
+                  : 'bg-blue-500 hover:bg-blue-600'
+              } text-white font-medium transition-colors`}
+            >
+              Начать запись
+            </button>
+            <button
+              onClick={handleStopRecording}
+              disabled={!isRecording && !isListening}
+              className={`px-4 py-2 rounded-lg ${
+                !isRecording && !isListening
+                  ? 'bg-gray-400'
+                  : 'bg-red-500 hover:bg-red-600'
+              } text-white font-medium transition-colors`}
+            >
+              Стоп запись
+            </button>
+          </div>
         </div>
 
         {/* Status Display */}
-        <div className="text-center text-lg font-medium">
+        <div className={`text-center text-lg font-medium ${
+          recordingError || recognitionError ? 'text-red-500' : ''
+        }`}>
           Статус: {status}
         </div>
 
@@ -63,13 +101,12 @@ export default function Home() {
           <label htmlFor="transcript" className="block font-medium">
             Транскрипция:
           </label>
-          <textarea
-            id="transcript"
-            value={transcript}
-            readOnly
-            className="w-full h-32 p-3 border rounded-lg bg-gray-50"
-            placeholder="Здесь появится текст вашего выступления..."
-          />
+          <div
+            className="w-full min-h-[8rem] p-3 border rounded-lg bg-gray-50 whitespace-pre-wrap"
+          >
+            {finalTranscript}
+            <span className="text-gray-400">{interimTranscript}</span>
+          </div>
         </div>
 
         {/* Analysis Results */}
