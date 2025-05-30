@@ -10,7 +10,42 @@ export interface SpeechAnalysis {
   wordCount: number;
   duration: number;
   recommendations: string[];
+  metrics: {
+    fillerWordsRatio: number;
+    speechRateDeviation: number;
+  };
 }
+
+export interface AnalysisThresholds {
+  minDuration: number;          // Минимальная длительность для полного анализа (в секундах)
+  maxFillerWordsRatio: number;  // Максимально допустимая доля слов-паразитов (0-1)
+  optimalSpeechRate: {          // Оптимальный темп речи
+    min: number;                // Минимум слов в минуту
+    max: number;                // Максимум слов в минуту
+    criticalDeviation: number;  // Критическое отклонение от среднего значения (в процентах)
+  };
+}
+
+const DEFAULT_THRESHOLDS: { [key: string]: AnalysisThresholds } = {
+  'ru-RU': {
+    minDuration: 30,           // 30 секунд минимум
+    maxFillerWordsRatio: 0.08, // Не более 8% слов-паразитов
+    optimalSpeechRate: {
+      min: 100,
+      max: 140,
+      criticalDeviation: 20    // 20% отклонение считается критическим
+    }
+  },
+  'en-US': {
+    minDuration: 30,           // 30 секунд минимум
+    maxFillerWordsRatio: 0.06, // Не более 6% слов-паразитов (в английском обычно меньше)
+    optimalSpeechRate: {
+      min: 120,
+      max: 160,
+      criticalDeviation: 20    // 20% отклонение считается критическим
+    }
+  }
+};
 
 const FILLER_WORDS = {
   'ru-RU': [
@@ -21,11 +56,6 @@ const FILLER_WORDS = {
     "um", "uh", "like", "you know", "sort of", "kind of", "basically", "actually",
     "literally", "well", "so", "right", "okay", "i mean"
   ]
-};
-
-const SPEECH_RATE_RANGES = {
-  'ru-RU': { min: 100, max: 140 },
-  'en-US': { min: 120, max: 160 }
 };
 
 export function countFillerWords(text: string, language: string): FillerWordsAnalysis {
@@ -85,62 +115,77 @@ export function calculateSpeechRate(text: string, durationInSeconds: number): nu
 export function analyzeSpeech(
   text: string,
   durationInSeconds: number,
-  language: string
+  language: string,
+  customThresholds?: Partial<AnalysisThresholds>
 ): SpeechAnalysis {
+  // Получаем пороговые значения с учетом пользовательских настроек
+  const defaultThresholds = DEFAULT_THRESHOLDS[language as keyof typeof DEFAULT_THRESHOLDS] || 
+                          DEFAULT_THRESHOLDS['en-US'];
+  const thresholds: AnalysisThresholds = {
+    ...defaultThresholds,
+    ...customThresholds,
+    optimalSpeechRate: {
+      ...defaultThresholds.optimalSpeechRate,
+      ...(customThresholds?.optimalSpeechRate || {})
+    }
+  };
+
   const wordCount = text.split(/\s+/).filter(Boolean).length;
   const speechRate = calculateSpeechRate(text, durationInSeconds);
   const fillerWords = countFillerWords(text, language);
+  const fillerWordsRatio = wordCount > 0 ? fillerWords.count / wordCount : 0;
+  
+  // Вычисляем отклонение от оптимального темпа речи
+  const optimalMean = (thresholds.optimalSpeechRate.max + thresholds.optimalSpeechRate.min) / 2;
+  const speechRateDeviation = Math.abs((speechRate - optimalMean) / optimalMean) * 100;
   
   const recommendations: string[] = [];
-  
-  // Анализ темпа речи
-  const rateRange = SPEECH_RATE_RANGES[language as keyof typeof SPEECH_RATE_RANGES] || 
-                   SPEECH_RATE_RANGES['en-US'];
-  
-  if (speechRate < rateRange.min) {
-    recommendations.push(
-      language === 'ru-RU' 
-        ? 'Темп речи слишком медленный. Попробуйте говорить немного быстрее для лучшего восприятия.'
-        : 'Speech rate is too slow. Try speaking a bit faster for better engagement.'
-    );
-  } else if (speechRate > rateRange.max) {
+
+  // Анализ длительности
+  if (durationInSeconds < thresholds.minDuration) {
     recommendations.push(
       language === 'ru-RU'
-        ? 'Темп речи слишком быстрый. Постарайтесь говорить медленнее для лучшей ясности.'
-        : 'Speech rate is too fast. Try speaking slower for better clarity.'
+        ? `Слишком короткое выступление (${Math.round(durationInSeconds)} сек). Для полноценного анализа нужно минимум ${thresholds.minDuration} секунд.`
+        : `Speech is too short (${Math.round(durationInSeconds)} sec). For meaningful analysis, speak for at least ${thresholds.minDuration} seconds.`
     );
   }
-
-  // Анализ слов-паразитов
-  if (fillerWords.count > 0) {
-    const fillerWordsRatio = fillerWords.count / wordCount;
-    if (fillerWordsRatio > 0.1) { // Более 10% слов - паразиты
+  
+  // Анализ темпа речи
+  if (speechRateDeviation > thresholds.optimalSpeechRate.criticalDeviation) {
+    if (speechRate < thresholds.optimalSpeechRate.min) {
+      recommendations.push(
+        language === 'ru-RU' 
+          ? `Темп речи слишком медленный (${speechRate} слов/мин). Оптимальный темп: ${thresholds.optimalSpeechRate.min}-${thresholds.optimalSpeechRate.max} слов/мин.`
+          : `Speech rate is too slow (${speechRate} words/min). Optimal range: ${thresholds.optimalSpeechRate.min}-${thresholds.optimalSpeechRate.max} words/min.`
+      );
+    } else if (speechRate > thresholds.optimalSpeechRate.max) {
       recommendations.push(
         language === 'ru-RU'
-          ? `Слишком много слов-паразитов (${fillerWords.count}). Постарайтесь избегать: ${
-              Object.entries(fillerWords.details)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 3)
-                .map(([word, count]) => `"${word}" (${count}×)`)
-                .join(', ')
-            }`
-          : `Too many filler words (${fillerWords.count}). Try to avoid: ${
-              Object.entries(fillerWords.details)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 3)
-                .map(([word, count]) => `"${word}" (${count}×)`)
-                .join(', ')
-            }`
+          ? `Темп речи слишком быстрый (${speechRate} слов/мин). Оптимальный темп: ${thresholds.optimalSpeechRate.min}-${thresholds.optimalSpeechRate.max} слов/мин.`
+          : `Speech rate is too fast (${speechRate} words/min). Optimal range: ${thresholds.optimalSpeechRate.min}-${thresholds.optimalSpeechRate.max} words/min.`
       );
     }
   }
 
-  // Анализ длительности
-  if (durationInSeconds < 30) {
+  // Анализ слов-паразитов
+  if (fillerWordsRatio > thresholds.maxFillerWordsRatio) {
+    const percentage = Math.round(fillerWordsRatio * 100);
     recommendations.push(
       language === 'ru-RU'
-        ? 'Слишком короткое выступление для полноценного анализа. Попробуйте говорить дольше.'
-        : 'Speech is too short for meaningful analysis. Try speaking longer.'
+        ? `Слишком много слов-паразитов (${percentage}% от всех слов). Постарайтесь избегать: ${
+            Object.entries(fillerWords.details)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 3)
+              .map(([word, count]) => `"${word}" (${count}×)`)
+              .join(', ')
+          }`
+        : `Too many filler words (${percentage}% of all words). Try to avoid: ${
+            Object.entries(fillerWords.details)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 3)
+              .map(([word, count]) => `"${word}" (${count}×)`)
+              .join(', ')
+          }`
     );
   }
 
@@ -149,6 +194,10 @@ export function analyzeSpeech(
     fillerWords,
     wordCount,
     duration: durationInSeconds,
-    recommendations
+    recommendations,
+    metrics: {
+      fillerWordsRatio,
+      speechRateDeviation
+    }
   };
 } 
