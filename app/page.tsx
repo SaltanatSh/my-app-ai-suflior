@@ -18,7 +18,13 @@ export default function Home() {
   const startTimeRef = useRef<number>(0);
   const wasListeningRef = useRef(false);
   
-  const { isRecording, error: recordingError, audioBlob } = useAudioRecorder();
+  const { 
+    isRecording,
+    error: recordingError,
+    audioBlob,
+    startRecording: startAudioRecording,
+    stopRecording: stopAudioRecording
+  } = useAudioRecorder();
   const {
     isListening,
     error: recognitionError,
@@ -69,10 +75,10 @@ export default function Home() {
       
       setAnalysisResults(results);
 
-      // Если есть аудио, отправляем его на анализ в Hume AI
-      if (audioBlob) {
-        handleStartHumeAnalysis();
-      }
+      // УБРАН АВТОМАТИЧЕСКИЙ ВЫЗОВ:
+      // if (audioBlob) {
+      //   handleStartHumeAnalysis();
+      // }
     }
     wasListeningRef.current = isListening;
   }, [isListening, finalTranscript, selectedLanguage, audioBlob]);
@@ -105,10 +111,12 @@ export default function Home() {
     setHumeJobId(null);
     setHumeResults(null);
     startTimeRef.current = Date.now();
+    await startAudioRecording();
     startListening();
   };
 
   const handleStopRecording = () => {
+    stopAudioRecording();
     stopListening();
   };
 
@@ -153,6 +161,7 @@ export default function Home() {
         </div>
 
         {/* Hume AI Analysis Button */}
+        {console.log('isRecording:', isRecording, 'audioBlob:', audioBlob)}
         {audioBlob && !isRecording && (
           <div className="flex justify-center">
             <button
