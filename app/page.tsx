@@ -1,13 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAudioRecorder } from './hooks/useAudioRecorder';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { LanguageSelector } from './components/LanguageSelector';
+import { AnalysisResults } from './components/AnalysisResults';
+import { analyzeSpeech, type SpeechAnalysis } from './utils/speechAnalysis';
 
 export default function Home() {
-  const [analysisResults, setAnalysisResults] = useState('');
+  const [analysisResults, setAnalysisResults] = useState<SpeechAnalysis | null>(null);
   const [status, setStatus] = useState('Готов к записи');
+  
+  const startTimeRef = useRef<number>(0);
+  const wasListeningRef = useRef(false);
   
   const { isRecording, error: recordingError, audioBlob } = useAudioRecorder();
   const {
@@ -39,9 +44,27 @@ export default function Home() {
     }
   }, [isRecording, isListening, recordingError, recognitionError, audioBlob]);
 
+  // Анализ речи после остановки записи
+  useEffect(() => {
+    if (wasListeningRef.current && !isListening && finalTranscript) {
+      const endTime = Date.now();
+      const durationInSeconds = (endTime - startTimeRef.current) / 1000;
+      
+      const results = analyzeSpeech(
+        finalTranscript,
+        durationInSeconds,
+        selectedLanguage
+      );
+      
+      setAnalysisResults(results);
+    }
+    wasListeningRef.current = isListening;
+  }, [isListening, finalTranscript, selectedLanguage]);
+
   const handleStartRecording = async () => {
     resetTranscript();
-    setAnalysisResults('');
+    setAnalysisResults(null);
+    startTimeRef.current = Date.now();
     startListening();
   };
 
@@ -112,8 +135,17 @@ export default function Home() {
         {/* Analysis Results */}
         <div className="space-y-2">
           <h2 className="font-medium">Результаты анализа:</h2>
-          <div className="p-4 border rounded-lg bg-gray-50 min-h-[200px]">
-            {analysisResults || 'Анализ будет доступен после записи выступления'}
+          <div className="rounded-lg bg-gray-50">
+            {analysisResults ? (
+              <AnalysisResults {...analysisResults} language={selectedLanguage} />
+            ) : (
+              <div className="p-4 text-gray-500">
+                {selectedLanguage === 'ru-RU' 
+                  ? 'Анализ будет доступен после записи выступления'
+                  : 'Analysis will be available after recording'
+                }
+              </div>
+            )}
           </div>
         </div>
       </div>
