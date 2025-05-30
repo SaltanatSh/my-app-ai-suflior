@@ -161,7 +161,6 @@ export default function Home() {
         </div>
 
         {/* Hume AI Analysis Button */}
-        {console.log('isRecording:', isRecording, 'audioBlob:', audioBlob)}
         {audioBlob && !isRecording && (
           <div className="flex justify-center">
             <button
